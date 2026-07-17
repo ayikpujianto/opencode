@@ -108,6 +108,8 @@ export function AIRuntimePanel() {
     const details = envelope?.details ?? {}
     const type = typeof details.type === "string" ? details.type : "runtime.event"
 
+    if (type === "server.connected") return
+
     if (isIgnoredRuntimeEvent(type)) return
 
     const tokenCount = tokensFrom(details)
