@@ -370,6 +370,13 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   }
 
   const unsub = serverSDK.event.listen((e) => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("studio-ai:runtime", {
+          detail: { name: e.name, details: e.details },
+        }),
+      )
+    }
     const directory = e.name
     const key = directoryKey(directory)
     const event = e.details

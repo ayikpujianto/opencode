@@ -45,6 +45,7 @@ import { usePlatform } from "@/context/platform"
 import { PromptProvider } from "@/context/prompt"
 import { ServerConnection, ServerProvider, serverName, useServer } from "@/context/server"
 import { SettingsProvider, useSettings } from "@/context/settings"
+import { AIRuntimePanel } from "@/components/studio-ai/ai-runtime-panel"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
 import { SDKProvider, useSDK } from "@/context/sdk"
 import { WslServersProvider } from "@/wsl/context"
@@ -274,7 +275,8 @@ function BodyDesignClass() {
 function SharedProviders(props: ParentProps) {
   return (
     <>
-      <BodyDesignClass />
+      
+        <AIRuntimePanel /><BodyDesignClass />
       <CommandProvider>
         <DesktopCommands />
         <HighlightsProvider>{props.children}</HighlightsProvider>
