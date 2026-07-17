@@ -59,6 +59,10 @@ function textFrom(value: unknown): string | undefined {
   }
 }
 
+function isIgnoredRuntimeEvent(type: string): boolean {
+  return /(^|[._ -])(heartbeat|server heartbeat|ping|pong)($|[._ -])/i.test(type)
+}
+
 function classify(type: string): RuntimeStatus {
   if (/(error|failed|failure|denied|rejected)/i.test(type)) return "error"
   if (/(completed|finished|success|succeeded|idle)/i.test(type)) return "success"
@@ -103,6 +107,9 @@ export function AIRuntimePanel() {
     const envelope = (raw as CustomEvent<RuntimeEnvelope>).detail
     const details = envelope?.details ?? {}
     const type = typeof details.type === "string" ? details.type : "runtime.event"
+
+    if (isIgnoredRuntimeEvent(type)) return
+
     const tokenCount = tokensFrom(details)
     const next: RuntimeEvent = {
       id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
