@@ -38,9 +38,10 @@ export function createSessionComposerController(options?: { closeMs?: number | (
   })
 
   const permissionRequest = createMemo((): PermissionRequest | undefined => {
-    return sessionPermissionRequest(sync().data.session, sync().data.permission, params.id, (item) => {
-      return !permission.autoResponds(item, sdk().directory)
-    })
+    // Pending requests must remain visible until the server confirms a response.
+    // Hiding them based only on auto-response prediction can deadlock the UI
+    // when the automatic response fails.
+    return sessionPermissionRequest(sync().data.session, sync().data.permission, params.id)
   })
 
   const blocked = createMemo(() => {
