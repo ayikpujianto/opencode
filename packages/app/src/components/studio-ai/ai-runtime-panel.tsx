@@ -1,5 +1,8 @@
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
 
+type RuntimeStatus = "active" | "success" | "error" | "neutral"
+type RuntimeFilter = "all" | "activity" | "errors"
+
 type RuntimeEvent = {
   id: number
   at: number
@@ -7,7 +10,7 @@ type RuntimeEvent = {
   directory?: string
   title: string
   detail?: string
-  status: "active" | "success" | "error" | "neutral"
+  status: RuntimeStatus
   tokens?: number
 }
 
@@ -20,7 +23,7 @@ type RuntimeEnvelope = {
   }
 }
 
-const MAX_EVENTS = 120
+const MAX_EVENTS = 160
 
 function numberFrom(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0
@@ -51,20 +54,21 @@ function textFrom(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return
   const data = value as Record<string, unknown>
   for (const key of ["title", "name", "command", "path", "file", "tool", "status"]) {
-    if (typeof data[key] === "string" && data[key]) return data[key] as string
+    const item = data[key]
+    if (typeof item === "string" && item.trim()) return item
   }
 }
 
-function classify(type: string): RuntimeEvent["status"] {
-  if (/(error|failed|denied)/i.test(type)) return "error"
-  if (/(completed|finished|success|idle)/i.test(type)) return "success"
-  if (/(started|running|updated|created|delta)/i.test(type)) return "active"
+function classify(type: string): RuntimeStatus {
+  if (/(error|failed|failure|denied|rejected)/i.test(type)) return "error"
+  if (/(completed|finished|success|succeeded|idle)/i.test(type)) return "success"
+  if (/(started|running|updated|created|delta|stream)/i.test(type)) return "active"
   return "neutral"
 }
 
 function label(type: string): string {
   const value = type.replace(/[._-]+/g, " ").trim()
-  return value ? value.replace(/\b\w/g, (x) => x.toUpperCase()) : "Runtime Event"
+  return value ? value.replace(/\b\w/g, (character) => character.toUpperCase()) : "Runtime Event"
 }
 
 function compactNumber(value: number): string {
@@ -73,20 +77,32 @@ function compactNumber(value: number): string {
   return String(value)
 }
 
-function time(value: number): string {
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+function eventTime(value: number): string {
+  return new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+}
+
+function statusDot(status: RuntimeStatus): string {
+  if (status === "error") return "bg-red-500"
+  if (status === "success") return "bg-green-500"
+  if (status === "active") return "bg-blue-500"
+  return "bg-text-weak"
 }
 
 export function AIRuntimePanel() {
   const [expanded, setExpanded] = createSignal(false)
+  const [filter, setFilter] = createSignal<RuntimeFilter>("all")
   const [events, setEvents] = createSignal<RuntimeEvent[]>([])
   const [startedAt, setStartedAt] = createSignal(Date.now())
+  const [now, setNow] = createSignal(Date.now())
 
   const onRuntime = (raw: Event) => {
     const envelope = (raw as CustomEvent<RuntimeEnvelope>).detail
     const details = envelope?.details ?? {}
     const type = typeof details.type === "string" ? details.type : "runtime.event"
-    const properties = details.properties
     const tokenCount = tokensFrom(details)
     const next: RuntimeEvent = {
       id: Date.now() * 1000 + Math.floor(Math.random() * 1000),
@@ -94,7 +110,7 @@ export function AIRuntimePanel() {
       type,
       directory: envelope?.name,
       title: label(type),
-      detail: textFrom(properties) ?? textFrom(details),
+      detail: textFrom(details.properties) ?? textFrom(details),
       status: classify(type),
       tokens: tokenCount || undefined,
     }
@@ -104,98 +120,156 @@ export function AIRuntimePanel() {
   onMount(() => {
     window.addEventListener("studio-ai:runtime", onRuntime)
     setStartedAt(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000)
+    onCleanup(() => window.clearInterval(timer))
   })
+
   onCleanup(() => window.removeEventListener("studio-ai:runtime", onRuntime))
 
-  const totalTokens = createMemo(() => events().reduce((sum, item) => sum + (item.tokens ?? 0), 0))
-  const errors = createMemo(() => events().filter((item) => item.status === "error").length)
+  const totalTokens = createMemo(() => events().reduce((sum, event) => sum + (event.tokens ?? 0), 0))
+  const errorCount = createMemo(() => events().filter((event) => event.status === "error").length)
   const current = createMemo(() => events().at(-1))
-  const status = createMemo(() => {
-    if (errors()) return "Needs attention"
+  const visibleEvents = createMemo(() => {
+    if (filter() === "errors") return events().filter((event) => event.status === "error")
+    if (filter() === "activity") return events().filter((event) => event.status === "active" || event.status === "success")
+    return events()
+  })
+  const runtimeStatus = createMemo(() => {
+    if (errorCount()) return "Needs attention"
     if (!events().length) return "Ready"
     if (current()?.status === "success") return "Completed"
     return "Running"
   })
+  const uptime = createMemo(() => Math.max(0, Math.floor((now() - startedAt()) / 60_000)))
+
+  const clearEvents = (event: MouseEvent) => {
+    event.stopPropagation()
+    setEvents([])
+  }
 
   return (
     <aside
-      class="fixed bottom-4 right-4 z-[90] w-[min(380px,calc(100vw-32px))] overflow-hidden rounded-xl border border-border-weak-base bg-background-base shadow-2xl"
+      class="fixed inset-x-0 bottom-0 z-[90] border-t border-border-weak-base bg-background-base shadow-[0_-8px_30px_rgba(0,0,0,0.16)]"
       aria-label="AI Runtime"
     >
-      <button
-        type="button"
-        class="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-background-weak"
-        onClick={() => setExpanded((value) => !value)}
-        aria-expanded={expanded()}
-      >
-        <span class={`h-2.5 w-2.5 shrink-0 rounded-full ${errors() ? "bg-red-500" : events().length ? "bg-blue-500 animate-pulse" : "bg-text-weak"}`} />
-        <span class="min-w-0 flex-1">
-          <span class="flex items-center justify-between gap-3">
-            <strong class="text-13-medium text-text-strong">AI Runtime</strong>
-            <span class="text-11-regular text-text-weak">{status()}</span>
-          </span>
-          <span class="mt-0.5 block truncate text-11-regular text-text-weak">
-            {current()?.title ?? "Waiting for runtime activity"}
-          </span>
-        </span>
-        <span class="text-14-regular text-text-weak">{expanded() ? "⌃" : "⌄"}</span>
-      </button>
-
-      <div class="grid grid-cols-4 border-t border-border-weak-base bg-background-weak/40">
-        <Metric label="Events" value={String(events().length)} />
-        <Metric label="Tokens" value={compactNumber(totalTokens())} />
-        <Metric label="Errors" value={String(errors())} />
-        <Metric label="Uptime" value={`${Math.max(0, Math.floor((Date.now() - startedAt()) / 60000))}m`} />
-      </div>
-
       <Show when={expanded()}>
-        <div class="max-h-[min(520px,60vh)] overflow-y-auto border-t border-border-weak-base">
-          <Show
-            when={events().length}
-            fallback={
-              <div class="px-4 py-8 text-center text-12-regular text-text-weak">
-                Runtime detail will appear when the agent starts working.
-              </div>
-            }
-          >
-            <div class="divide-y divide-border-weak-base">
-              <For each={[...events()].reverse()}>
-                {(event) => (
-                  <div class="flex gap-3 px-4 py-3">
-                    <span class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${event.status === "error" ? "bg-red-500" : event.status === "success" ? "bg-green-500" : event.status === "active" ? "bg-blue-500" : "bg-text-weak"}`} />
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-start justify-between gap-3">
-                        <span class="truncate text-12-medium text-text-strong">{event.title}</span>
-                        <span class="shrink-0 text-10-regular text-text-weak">{time(event.at)}</span>
-                      </div>
-                      <Show when={event.detail}>
-                        <div class="mt-0.5 truncate text-11-regular text-text-weak">{event.detail}</div>
-                      </Show>
-                      <div class="mt-1 flex gap-2 text-10-regular text-text-weak">
-                        <Show when={event.directory}>
-                          <span class="max-w-[220px] truncate">{event.directory}</span>
-                        </Show>
-                        <Show when={event.tokens}>
-                          <span>{compactNumber(event.tokens!)} tokens</span>
-                        </Show>
+        <section class="h-[min(420px,46vh)] min-h-[240px] border-b border-border-weak-base">
+          <header class="flex h-11 items-center justify-between gap-3 border-b border-border-weak-base px-4">
+            <div class="flex min-w-0 items-center gap-3">
+              <strong class="text-12-medium text-text-strong">AI Runtime</strong>
+              <nav class="flex items-center rounded-md bg-background-weak p-0.5">
+                <FilterButton active={filter() === "all"} onClick={() => setFilter("all")} label={`All ${events().length}`} />
+                <FilterButton active={filter() === "activity"} onClick={() => setFilter("activity")} label="Activity" />
+                <FilterButton active={filter() === "errors"} onClick={() => setFilter("errors")} label={`Errors ${errorCount()}`} />
+              </nav>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="rounded px-2 py-1 text-11-regular text-text-weak hover:bg-background-weak hover:text-text-strong" onClick={clearEvents}>
+                Clear
+              </button>
+              <button type="button" class="rounded px-2 py-1 text-14-regular text-text-weak hover:bg-background-weak hover:text-text-strong" onClick={() => setExpanded(false)} aria-label="Collapse AI Runtime">
+                ⌄
+              </button>
+            </div>
+          </header>
+
+          <div class="grid h-[calc(100%-44px)] grid-cols-[minmax(0,1fr)_220px]">
+            <div class="overflow-y-auto">
+              <Show
+                when={visibleEvents().length}
+                fallback={
+                  <div class="flex h-full items-center justify-center px-6 text-center">
+                    <div>
+                      <div class="text-12-medium text-text-strong">No runtime activity yet</div>
+                      <div class="mt-1 text-11-regular text-text-weak">
+                        Start an AI task. Reads, edits, tools, verification, and usage events will appear here.
                       </div>
                     </div>
                   </div>
-                )}
-              </For>
+                }
+              >
+                <div class="divide-y divide-border-weak-base">
+                  <For each={[...visibleEvents()].reverse()}>
+                    {(event) => (
+                      <article class="grid grid-cols-[84px_14px_minmax(0,1fr)_auto] items-start gap-3 px-4 py-2.5 hover:bg-background-weak/60">
+                        <time class="pt-0.5 text-10-regular text-text-weak">{eventTime(event.at)}</time>
+                        <span class={`mt-1.5 h-2 w-2 rounded-full ${statusDot(event.status)}`} />
+                        <div class="min-w-0">
+                          <div class="truncate text-12-medium text-text-strong">{event.title}</div>
+                          <Show when={event.detail}>
+                            <div class="mt-0.5 truncate text-11-regular text-text-weak">{event.detail}</div>
+                          </Show>
+                          <Show when={event.directory}>
+                            <div class="mt-0.5 truncate text-10-regular text-text-weak">{event.directory}</div>
+                          </Show>
+                        </div>
+                        <Show when={event.tokens}>
+                          <span class="rounded bg-background-weak px-1.5 py-0.5 text-10-medium text-text-weak">{compactNumber(event.tokens!)} tokens</span>
+                        </Show>
+                      </article>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </div>
-          </Show>
-        </div>
+
+            <aside class="border-l border-border-weak-base bg-background-weak/30 p-4">
+              <div class="text-10-medium uppercase tracking-wide text-text-weak">Current session</div>
+              <div class="mt-3 space-y-3">
+                <SummaryRow label="Status" value={runtimeStatus()} />
+                <SummaryRow label="Current" value={current()?.title ?? "Waiting for activity"} />
+                <SummaryRow label="Events" value={String(events().length)} />
+                <SummaryRow label="Tokens" value={compactNumber(totalTokens())} />
+                <SummaryRow label="Errors" value={String(errorCount())} />
+                <SummaryRow label="Uptime" value={`${uptime()}m`} />
+              </div>
+              <div class="mt-5 border-t border-border-weak-base pt-3 text-10-regular leading-4 text-text-weak">
+                Detailed runtime data stays hidden until this panel is expanded.
+              </div>
+            </aside>
+          </div>
+        </section>
       </Show>
+
+      <button
+        type="button"
+        class="flex h-8 w-full items-center justify-between gap-4 px-3 text-left hover:bg-background-weak"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded()}
+      >
+        <div class="flex min-w-0 items-center gap-2">
+          <span class={`h-2 w-2 shrink-0 rounded-full ${errorCount() ? "bg-red-500" : events().length ? "bg-blue-500 animate-pulse" : "bg-text-weak"}`} />
+          <strong class="shrink-0 text-11-medium text-text-strong">AI Runtime</strong>
+          <span class="truncate text-11-regular text-text-weak">{current()?.title ?? "Ready"}</span>
+        </div>
+        <div class="flex shrink-0 items-center gap-4 text-10-regular text-text-weak">
+          <span>{events().length} events</span>
+          <span>{compactNumber(totalTokens())} tokens</span>
+          <Show when={errorCount()}><span class="text-red-500">{errorCount()} errors</span></Show>
+          <span>{expanded() ? "⌄" : "⌃"}</span>
+        </div>
+      </button>
     </aside>
   )
 }
 
-function Metric(props: { label: string; value: string }) {
+function FilterButton(props: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <div class="border-r border-border-weak-base px-2 py-2 text-center last:border-r-0">
-      <div class="text-12-medium text-text-strong">{props.value}</div>
+    <button
+      type="button"
+      class={`rounded px-2 py-1 text-10-medium ${props.active ? "bg-background-base text-text-strong shadow-sm" : "text-text-weak hover:text-text-strong"}`}
+      onClick={props.onClick}
+    >
+      {props.label}
+    </button>
+  )
+}
+
+function SummaryRow(props: { label: string; value: string }) {
+  return (
+    <div>
       <div class="text-10-regular text-text-weak">{props.label}</div>
+      <div class="mt-0.5 truncate text-11-medium text-text-strong">{props.value}</div>
     </div>
   )
 }
