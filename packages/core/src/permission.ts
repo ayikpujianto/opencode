@@ -3,6 +3,7 @@ export * as PermissionV2 from "./permission"
 import { makeLocationNode } from "./effect/app-node"
 import { Context, Deferred, Effect as EffectRuntime, Layer, Schema } from "effect"
 import { Permission } from "@opencode-ai/schema/permission"
+import { Config } from "./config"
 import { EventV2 } from "./event"
 import { Location } from "./location"
 import { AgentV2 } from "./agent"
@@ -106,6 +107,12 @@ interface Pending {
   readonly deferred: Deferred.Deferred<void, DeclinedError | CorrectedError>
 }
 
+function isAutoApprove(config: Config.Info): boolean {
+  const perm = config.permissions
+  if (!perm) return false
+  return perm.some((rule) => rule.action === "*" && rule.resource === "*" && rule.effect === "allow")
+}
+
 const layer = Layer.effect(
   Service,
   EffectRuntime.gen(function* () {
@@ -114,7 +121,13 @@ const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const sessions = yield* SessionStore.Service
     const saved = yield* PermissionSaved.Service
+    const configEntries = yield* Config.Service
     const pending = new Map<ID, Pending>()
+
+    const autoApprove = EffectRuntime.fnUntraced(function* () {
+      const entries = yield* configEntries.entries().pipe(EffectRuntime.catch(() => EffectRuntime.succeed([])))
+      return entries.some((entry) => entry.type === "document" && isAutoApprove(entry.info))
+    })
 
     yield* EffectRuntime.addFinalizer(() =>
       EffectRuntime.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new DeclinedError()), {
@@ -190,7 +203,17 @@ const layer = Layer.effect(
     const ask = EffectRuntime.fn("PermissionV2.ask")(function* (input: AssertInput) {
       const result = yield* evaluateInput(input)
       const value = request(input)
-      if (result.effect === "ask") yield* create(value, input.agent)
+      if (result.effect === "ask") {
+        if (yield* autoApprove()) {
+          yield* events.publish(Event.Replied, {
+            sessionID: value.sessionID,
+            requestID: value.id,
+            reply: "once",
+          })
+          return { id: value.id, effect: "allow" as const }
+        }
+        yield* create(value, input.agent)
+      }
       return { id: value.id, effect: result.effect }
     })
 
@@ -204,6 +227,14 @@ const layer = Layer.effect(
             })
           }
           if (result.effect === "allow") return
+          if (yield* autoApprove()) {
+            yield* events.publish(Event.Replied, {
+              sessionID: input.sessionID,
+              requestID: input.id ?? ID.create(),
+              reply: "once",
+            })
+            return
+          }
           const item = yield* create(request(input), input.agent)
           return yield* restore(Deferred.await(item.deferred)).pipe(
             EffectRuntime.catchTag("PermissionV2.DeclinedError", (error) => EffectRuntime.die(error)),
@@ -306,5 +337,5 @@ export const locationLayer = layer.pipe(Layer.provideMerge(AgentV2.locationLayer
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [EventV2.node, Location.node, AgentV2.node, SessionStore.node, PermissionSaved.node],
+  deps: [EventV2.node, Location.node, AgentV2.node, SessionStore.node, PermissionSaved.node, Config.node],
 })

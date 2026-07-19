@@ -111,6 +111,15 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {}
 }
 
+/** Normalize event payload: prefer details.properties when non-empty, else fall back to details directly. */
+function extractProps(details: Record<string, unknown>): Record<string, unknown> {
+  const props = details.properties
+  if (props && typeof props === "object" && !Array.isArray(props) && Object.keys(props as object).length > 0) {
+    return props as Record<string, unknown>
+  }
+  return details
+}
+
 function str(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined
 }
@@ -132,12 +141,33 @@ function sumTokens(value: unknown, seen = new Set<object>()): number {
   let total = 0
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (/^(input|output|cache(Read|Write)?|read|write|reasoning|total)(Tokens?)?$/i.test(key)) {
-      total += num(item) ?? 0
-      continue
+      const numericValue = num(item)
+      if (numericValue !== undefined) {
+        total += numericValue
+        continue
+      }
     }
     if (typeof item === "object") total += sumTokens(item, seen)
   }
   return total
+}
+
+/** Extract token count from any known payload shape. Checks details.properties.tokens, details.tokens, and p.tokens. */
+function extractTokens(
+  details: Record<string, unknown>,
+  p: Record<string, unknown>,
+): number | undefined {
+  const fromP = p.tokens
+  if (fromP && typeof fromP === "object") {
+    const sum = sumTokens(fromP)
+    if (sum > 0) return sum
+  }
+  const fromDetails = details.tokens
+  if (fromDetails && typeof fromDetails === "object") {
+    const sum = sumTokens(fromDetails)
+    if (sum > 0) return sum
+  }
+  return undefined
 }
 
 function errorMessage(value: unknown): string | undefined {
@@ -226,6 +256,20 @@ export function createConsoleModel() {
   const reset = () => {
     lastAt = 0
     open.clear()
+  }
+
+  /** Settle all currently open entries to the given status. Returns merged outcome. */
+  const settleAllActive = (
+    at: number,
+    status: ConsoleStatus,
+    reason?: string,
+  ): ConsoleOutcome[] => {
+    const outcomes: ConsoleOutcome[] = []
+    for (const [key] of open) {
+      const result = settle(key, at, { status, detail: reason }, { finishFile: true })
+      if (result) outcomes.push(result)
+    }
+    return outcomes
   }
 
   const build = (input: {
@@ -324,7 +368,7 @@ export function createConsoleModel() {
     if (/(^|[._ -])(heartbeat|ping|pong)($|[._ -])/i.test(type)) return undefined
 
     const directory = str(envelope?.name)
-    const p = record(details.properties)
+    const p = extractProps(details)
     const at = Date.now()
     const base = { at, type, directory, payload: details as unknown }
 
@@ -552,7 +596,7 @@ export function createConsoleModel() {
         )
       }
       case "session.next.step.ended": {
-        const tokens = sumTokens(p.tokens)
+        const tokens = extractTokens(details, p) ?? 0
         const cost = num(p.cost)
         const files = Array.isArray(p.files)
           ? p.files
@@ -876,21 +920,76 @@ export function createConsoleModel() {
           }),
         )
 
-      case "session.idle":
-        return begin(
-          undefined,
-          build({
-            ...base,
-            kind: "success",
-            category: "system",
-            status: "success",
-            title: "Session Idle",
-            group: str(p.sessionID),
-          }),
+      case "session.idle": {
+        const settled = settleAllActive(at, "success", "Session complete")
+        return (
+          settled[0] ??
+          begin(
+            undefined,
+            build({
+              ...base,
+              kind: "success",
+              category: "system",
+              status: "success",
+              title: "Session Idle",
+              group: str(p.sessionID),
+            }),
+          )
         )
+      }
 
-      case "session.status":
+      case "session.status": {
+        const info = record(p.status)
+        const statusType = str(info.type)
+        if (statusType === "busy") {
+          return begin(
+            undefined,
+            build({
+              ...base,
+              kind: "system",
+              category: "system",
+              status: "active",
+              title: "Session Busy",
+              group: str(p.sessionID),
+            }),
+          )
+        }
+        if (statusType === "retry") {
+          const attempt = num(info.attempt)
+          const message = str(info.message)
+          return begin(
+            undefined,
+            build({
+              ...base,
+              kind: "error",
+              category: "system",
+              status: "active",
+              title: "Retrying",
+              detail: message ? clean(message) : undefined,
+              attempt,
+              group: str(p.sessionID),
+            }),
+          )
+        }
+        if (statusType === "idle") {
+          const settled = settleAllActive(at, "success", "Session complete")
+          return (
+            settled[0] ??
+            begin(
+              undefined,
+              build({
+                ...base,
+                kind: "system",
+                category: "system",
+                status: "success",
+                title: "Session Idle",
+                group: str(p.sessionID),
+              }),
+            )
+          )
+        }
         return undefined
+      }
 
       case "session.updated": {
         const info = record(p.info)
@@ -1166,5 +1265,5 @@ export function createConsoleModel() {
     )
   }
 
-  return { ingest, reset }
+  return { ingest, reset, settleAllActive }
 }
