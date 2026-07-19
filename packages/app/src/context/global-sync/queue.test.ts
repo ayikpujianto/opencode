@@ -43,4 +43,47 @@ describe("createRefreshQueue", () => {
     expect(calls).toEqual(["C:\\tmp\\demo"])
     queue.dispose()
   })
+
+  test("calls onDrain when queue finishes", async () => {
+    let drainCount = 0
+    const queue = createRefreshQueue({
+      paused: () => false,
+      key: directoryKey,
+      bootstrap: async () => {},
+      bootstrapInstance: async () => {},
+      onDrain: () => {
+        drainCount++
+      },
+    })
+
+    queue.push("/repo/a")
+    queue.push("/repo/b")
+
+    await tick()
+    await tick()
+
+    expect(drainCount).toBeGreaterThanOrEqual(1)
+    queue.dispose()
+  })
+
+  test("calls onDrain after bootstrap completes", async () => {
+    let drainCount = 0
+    const queue = createRefreshQueue({
+      paused: () => false,
+      key: directoryKey,
+      bootstrap: async () => {},
+      bootstrapInstance: async () => {},
+      onDrain: () => {
+        drainCount++
+      },
+    })
+
+    queue.refresh()
+
+    await tick()
+    await tick()
+
+    expect(drainCount).toBeGreaterThanOrEqual(1)
+    queue.dispose()
+  })
 })

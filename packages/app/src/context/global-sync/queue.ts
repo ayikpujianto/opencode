@@ -3,6 +3,7 @@ type QueueInput = {
   bootstrap: () => Promise<void>
   bootstrapInstance: (directory: string) => Promise<void> | void
   key?: (directory: string) => string
+  onDrain?: () => void
 }
 
 export function createRefreshQueue(input: QueueInput) {
@@ -60,7 +61,10 @@ export function createRefreshQueue(input: QueueInput) {
           continue
         }
         const dirs = take(2)
-        if (dirs.length === 0) return
+        if (dirs.length === 0) {
+          input.onDrain?.()
+          return
+        }
         await Promise.all(dirs.map((dir) => input.bootstrapInstance(dir)))
         await tick()
       }

@@ -1430,4 +1430,24 @@ describe("server session", () => {
     expect(ctx.store.data.message.active?.map((message) => message.id)).toEqual(["message"])
     expect(ctx.store.data.session_status["session-0"]).toBeUndefined()
   })
+
+  test("tracks resolved sessions for preservation during reconcile", async () => {
+    const ctx = setup({ child: session("child", "root"), root: session("root") })
+
+    // Resolve a session via HTTP
+    await ctx.store.lineage.resolve("child")
+
+    // The session should be in resolvedSessions
+    expect(ctx.store.resolvedSessions.has("child")).toBe(true)
+  })
+
+  test("resolved sessions persist in data.info after resolve", async () => {
+    const ctx = setup({ child: session("child", "root"), root: session("root") })
+
+    await ctx.store.lineage.resolve("child")
+
+    // Session should be in data.info
+    expect(ctx.store.data.info["child"]).toBeDefined()
+    expect(ctx.store.data.info["child"]?.id).toBe("child")
+  })
 })

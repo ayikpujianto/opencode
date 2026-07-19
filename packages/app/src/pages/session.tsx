@@ -232,6 +232,7 @@ function ResolvedTargetSessionRoute() {
   const current = createSessionLineage(
     () => params.id,
     () => sync().session.lineage,
+    { refreshing: () => sync().refreshing() },
   )
   const directory = createMemo(() => current()?.session.directory)
   const targetDirectory = () => directory()!

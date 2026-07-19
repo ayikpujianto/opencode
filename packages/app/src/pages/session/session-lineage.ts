@@ -25,7 +25,11 @@ type Resolution<T> = { id: string; store: LineageStore<T> } & (
 // so trusting a previous target's settlement would fabricate a not-found for a
 // session that simply has not resolved yet. Resolve failures rethrow on read so
 // the enclosing SessionRouteErrorBoundary renders the scoped session error.
-export function createSessionLineage<T>(sessionID: () => string, lineage: () => LineageStore<T>) {
+export function createSessionLineage<T>(
+  sessionID: () => string,
+  lineage: () => LineageStore<T>,
+  options?: { refreshing?: () => boolean },
+) {
   const cached = createMemo(() => lineage().peek(sessionID()))
   const [status, setStatus] = createSignal<Resolution<T>>()
 
@@ -63,7 +67,18 @@ export function createSessionLineage<T>(sessionID: () => string, lineage: () => 
     // after settlement means the session (or an ancestor) was deleted, possibly
     // by another client. Match the resolve error so the boundary shows the
     // session not found fallback.
-    if (state.state === "settled") throw sessionNotFoundError(id)
+    //
+    // During a server reconnection the sync store is being re-populated by the
+    // refresh queue.  A session that was individually resolved (via HTTP) may
+    // temporarily sit in the info cache but not yet in the store's session list,
+    // causing peekLineage to return undefined even though the session exists on
+    // the server.  Return undefined instead of throwing so the boundary shows a
+    // loading / pending state rather than a permanent not-found error.  Once the
+    // refresh completes the lineage will re-evaluate with the full store.
+    if (state.state === "settled") {
+      if (options?.refreshing?.()) return undefined
+      throw sessionNotFoundError(id)
+    }
     return undefined
   })
 }

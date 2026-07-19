@@ -5,10 +5,11 @@ import type {
   Path,
   Project,
   ProviderAuthResponse,
+  Session,
 } from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
-import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
+import { type Accessor, batch, createMemo, createSignal, getOwner, onCleanup, onMount, untrack } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { useLanguage } from "@/context/language"
 import type { InitError } from "../pages/error"
@@ -158,6 +159,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
   let bootingRoot = false
   let eventFrame: number | undefined
   let eventTimer: ReturnType<typeof setTimeout> | undefined
+  const [refreshing, setRefreshing] = createSignal(false)
 
   onCleanup(() => {
     if (eventFrame !== undefined) cancelAnimationFrame(eventFrame)
@@ -208,6 +210,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     key: directoryKey,
     bootstrap: () => queryClient.fetchQuery({ queryKey: [serverSDK.scope, "bootstrap"] }),
     bootstrapInstance,
+    onDrain: () => setRefreshing(false),
   })
 
   const session = createServerSession(serverSDK.client)
@@ -289,10 +292,14 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
                 .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
               const limit = Math.max(store.limit, options?.limit ?? 0, sessionMeta.get(key)?.limit ?? 0)
               const childSessions = store.session.filter((s) => !!s.parentID)
-              const next = trimSessions([...nonArchived, ...childSessions], {
+              const trimmed = trimSessions([...nonArchived, ...childSessions], {
                 limit,
                 permission: session.data.permission,
               })
+              const resolved = [...session.resolvedSessions]
+                .map((id) => session.data.info[id])
+                .filter((s): s is Session => !!s && s.directory === directory && !trimmed.some((t) => t.id === s.id))
+              const next = resolved.length > 0 ? [...trimmed, ...resolved] : trimmed
               batch(() => {
                 next.forEach(session.remember)
                 setStore(
@@ -396,6 +403,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return
+        setRefreshing(true)
         for (const directory of Object.keys(children.children)) {
           queue.push(directory)
         }
@@ -485,6 +493,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
     get error() {
       return globalStore.error
     },
+    refreshing,
     child: children.child,
     peek: children.peek,
     disableMcp: children.disableMcp,

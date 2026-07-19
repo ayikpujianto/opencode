@@ -151,6 +151,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     },
   })
   const requests = new Map<string, Promise<Session>>()
+  const resolvedSessions = new Set<string>()
   const inflight = new Map<string, Promise<void>>()
   const inflightDiff = new Map<string, Promise<void>>()
   const inflightTodo = new Map<string, Promise<void>>()
@@ -242,6 +243,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     const active = generation(sessionID)
     const request = client.session.get({ sessionID }).then((result) => {
       if (!result.data) throw sessionNotFoundError(sessionID)
+      resolvedSessions.add(sessionID)
       if (generations.get(sessionID) !== active) return result.data
       return remember(result.data)
     })
@@ -1052,6 +1054,7 @@ export function createServerSession(client: OpencodeClient, options?: { retry?: 
     peek: (sessionID: string) => data.info[sessionID],
     remember,
     resolve,
+    resolvedSessions,
     lineage: {
       peek: peekLineage,
       async resolve(sessionID: string) {

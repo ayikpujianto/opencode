@@ -103,12 +103,14 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   type Queued = QueuedServerEvent
   const FLUSH_FRAME_MS = 16
   const STREAM_YIELD_MS = 8
-  const RECONNECT_DELAY_MS = 250
+  const RECONNECT_BASE_MS = 250
+  const RECONNECT_MAX_MS = 30_000
 
   let queue: Queued[] = []
   let buffer: Queued[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   let last = 0
+  let reconnectAttempt = 0
 
   const flush = () => {
     if (timer) clearTimeout(timer)
@@ -191,6 +193,7 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
           resetHeartbeat()
           for await (const event of events.stream) {
             resetHeartbeat()
+            reconnectAttempt = 0
             streamErrorLogged = false
             if (event.payload.type !== "sync") {
               const directory = event.directory ?? "global"
@@ -218,7 +221,9 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
         }
 
         if (abort.signal.aborted || !started || generation !== active) return
-        await wait(RECONNECT_DELAY_MS)
+        const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempt, RECONNECT_MAX_MS)
+        reconnectAttempt++
+        await wait(delay)
       }
     })().finally(() => {
       if (run !== current) return
