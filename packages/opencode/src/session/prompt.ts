@@ -599,16 +599,33 @@ const layer = Layer.effect(
       const exit = yield* provider.getModel(providerID, modelID).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return exit.value
       const err = Cause.squash(exit.cause)
+      const originalMessage = err instanceof Error ? err.message : String(err)
+      yield* Effect.logError("getModel failed", {
+        "session.id": sessionID,
+        providerID,
+        modelID,
+        error: originalMessage,
+        stack: err instanceof Error ? err.stack : undefined,
+      })
+      const base = `Unable to resolve model '${modelID}' from provider '${providerID}'`
       if (Provider.ModelNotFoundError.isInstance(err)) {
         const hint = err.suggestions?.length ? ` Did you mean: ${err.suggestions.join(", ")}?` : ""
         yield* events.publish(Session.Event.Error, {
           sessionID,
           error: new NamedError.Unknown({
-            message: `Model not found: ${err.providerID}/${err.modelID}.${hint}`,
+            message: `${base}: ${originalMessage}.${hint}`,
+          }).toObject(),
+        })
+      } else {
+        yield* events.publish(Session.Event.Error, {
+          sessionID,
+          error: new NamedError.Unknown({
+            message: `${base}: ${originalMessage}`,
           }).toObject(),
         })
       }
-      return yield* Effect.die(err)
+      const error = err instanceof Error ? err : new Error(originalMessage)
+      return yield* Effect.die(error)
     })
 
     const currentModel = Effect.fnUntraced(function* (sessionID: SessionID) {
