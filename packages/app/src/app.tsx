@@ -61,6 +61,8 @@ import { SessionPage, SessionRouteErrorBoundary, TargetSessionRouteContent } fro
 import { NewHome, LegacyHome } from "@/pages/home"
 
 const NewSession = lazy(() => import("@/pages/new-session"))
+const WorkspacePage = lazy(() => import("@/pages/workspace/workspace").then((m) => ({ default: m.WorkspacePage })))
+const PatchReviewPage = lazy(() => import("@/pages/workspace/review/patch-review").then((m) => ({ default: m.PatchReviewPage })))
 
 const SessionRoute = () => {
   const settings = useSettings()
@@ -602,6 +604,8 @@ function Routes(props: { serverScoped?: JSX.Element }) {
         <Route path="/:dir" component={DirectoryLayout}>
           <Route path="/" component={() => <Navigate href="session" />} />
           <Route path="/session/:id?" component={SessionRoute} />
+          <Route path="/workspace" component={WorkspacePage} />
+          <Route path="/review" component={PatchReviewPage} />
         </Route>
       </Route>
       <Show when={settings.general.newLayoutDesigns()}>

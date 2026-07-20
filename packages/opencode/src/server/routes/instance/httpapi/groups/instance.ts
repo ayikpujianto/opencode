@@ -40,6 +40,17 @@ export class ApiVcsApplyError extends Schema.ErrorClass<ApiVcsApplyError>("VcsAp
   { httpApiStatus: 400 },
 ) {}
 
+export class ApiVcsMutationError extends Schema.ErrorClass<ApiVcsMutationError>("VcsMutationError")(
+  {
+    name: Schema.Literal("VcsCommitError"),
+    data: Schema.Struct({
+      message: Schema.String,
+      reason: Schema.Literals(["non-git", "empty-message", "nothing-to-commit", "push-failed"]),
+    }),
+  },
+  { httpApiStatus: 400 },
+) {}
+
 export const InstancePaths = {
   dispose: "/instance/dispose",
   path: "/path",
@@ -48,6 +59,12 @@ export const InstancePaths = {
   vcsDiff: "/vcs/diff",
   vcsDiffRaw: "/vcs/diff/raw",
   vcsApply: "/vcs/apply",
+  vcsStage: "/vcs/stage",
+  vcsUnstage: "/vcs/unstage",
+  vcsCommit: "/vcs/commit",
+  vcsPush: "/vcs/push",
+  vcsLog: "/vcs/log",
+  vcsRepository: "/vcs/repository",
   command: "/command",
   agent: "/agent",
   skill: "/skill",
@@ -134,6 +151,82 @@ export const InstanceApi = HttpApi.make("instance")
             identifier: "vcs.apply",
             summary: "Apply VCS patch",
             description: "Apply a raw patch to the current working tree.",
+          }),
+        ),
+        HttpApiEndpoint.post("vcsStage", InstancePaths.vcsStage, {
+          query: WorkspaceRoutingQuery,
+          payload: Vcs.StageInput,
+          success: described(Schema.Void, "Files staged"),
+          error: ApiVcsMutationError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.stage",
+            summary: "Stage files",
+            description: "Stage files for the next commit.",
+          }),
+        ),
+        HttpApiEndpoint.post("vcsUnstage", InstancePaths.vcsUnstage, {
+          query: WorkspaceRoutingQuery,
+          payload: Vcs.UnstageInput,
+          success: described(Schema.Void, "Files unstaged"),
+          error: ApiVcsMutationError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.unstage",
+            summary: "Unstage files",
+            description: "Remove files from the staging area.",
+          }),
+        ),
+        HttpApiEndpoint.post("vcsCommit", InstancePaths.vcsCommit, {
+          query: WorkspaceRoutingQuery,
+          payload: Vcs.CommitInput,
+          success: described(Vcs.CommitResult, "Commit created"),
+          error: ApiVcsMutationError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.commit",
+            summary: "Create commit",
+            description: "Create a new commit with the staged changes.",
+          }),
+        ),
+        HttpApiEndpoint.post("vcsPush", InstancePaths.vcsPush, {
+          query: WorkspaceRoutingQuery,
+          success: described(Vcs.PushResult, "Push completed"),
+          error: ApiVcsMutationError,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.push",
+            summary: "Push changes",
+            description: "Push the current branch to the remote repository.",
+          }),
+        ),
+        HttpApiEndpoint.get("vcsLog", InstancePaths.vcsLog, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(Vcs.CommitInfo), "Recent commits"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.log",
+            summary: "Get recent commits",
+            description: "Retrieve recent commit history.",
+          }),
+        ),
+        HttpApiEndpoint.get("vcsRepository", InstancePaths.vcsRepository, {
+          query: WorkspaceRoutingQuery,
+          success: described(
+            Schema.Struct({
+              branch: Schema.optional(Schema.String),
+              defaultBranch: Schema.optional(Schema.String),
+              status: Schema.Array(Vcs.FileStatus),
+              lastCommit: Schema.optional(Vcs.CommitInfo),
+              isGit: Schema.Boolean,
+            }),
+            "Repository info",
+          ),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "vcs.repository",
+            summary: "Get repository info",
+            description: "Get comprehensive repository status including branch, files, and last commit.",
           }),
         ),
         HttpApiEndpoint.get("command", InstancePaths.command, {

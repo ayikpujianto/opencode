@@ -333,3 +333,158 @@ describe("Vcs diff", () => {
     { git: true },
   )
 })
+
+describe("Vcs stage/unstage/commit/push", () => {
+  afterEach(async () => {
+    await disposeAllInstances()
+  })
+
+  it.instance(
+    "stage() stages files for commit",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+
+        const vcs = yield* init()
+        yield* vcs.stage({ files: ["file.txt"] })
+
+        const status = yield* vcs.status()
+        const staged = status.find((s) => s.file === "file.txt")
+        expect(staged).toBeDefined()
+        expect(staged?.status).toBe("added")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "unstage() removes files from staging area",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+        yield* git(test.directory, ["add", "file.txt"])
+
+        const vcs = yield* init()
+        yield* vcs.unstage({ files: ["file.txt"] })
+
+        const status = yield* vcs.status()
+        const unstaged = status.filter((s) => s.file === "file.txt")
+        expect(unstaged.length).toBe(1)
+        expect(unstaged[0].status).toBe("added")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "commit() creates a new commit",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+        yield* git(test.directory, ["add", "file.txt"])
+
+        const vcs = yield* init()
+        const result = yield* vcs.commit({ message: "test commit" })
+
+        expect(result.hash).toBeDefined()
+        expect(result.hash.length).toBeGreaterThan(0)
+
+        const log = yield* vcs.log(1)
+        expect(log.length).toBe(1)
+        expect(log[0].subject).toBe("test commit")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "commit() fails with empty message",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+        yield* git(test.directory, ["add", "file.txt"])
+
+        const vcs = yield* init()
+        const result = yield* vcs.commit({ message: "" }).pipe(Effect.flip)
+
+        expect(result._tag).toBe("VcsCommitError")
+        expect(result.reason).toBe("empty-message")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "commit() fails when nothing to commit",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+
+        const vcs = yield* init()
+        const result = yield* vcs.commit({ message: "empty commit" }).pipe(Effect.flip)
+
+        expect(result._tag).toBe("VcsCommitError")
+        expect(result.reason).toBe("nothing-to-commit")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "log() returns recent commits",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+        yield* git(test.directory, ["add", "file.txt"])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "first commit"])
+        yield* write(path.join(test.directory, "file2.txt"), "content2\n")
+        yield* git(test.directory, ["add", "file2.txt"])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "second commit"])
+
+        const vcs = yield* init()
+        const log = yield* vcs.log(2)
+
+        expect(log.length).toBe(2)
+        expect(log[0].subject).toBe("second commit")
+        expect(log[1].subject).toBe("first commit")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "repositoryInfo() returns comprehensive info",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* write(path.join(test.directory, "file.txt"), "content\n")
+        yield* git(test.directory, ["add", "file.txt"])
+        yield* git(test.directory, ["commit", "--no-gpg-sign", "-m", "initial commit"])
+        yield* write(path.join(test.directory, "new.txt"), "new content\n")
+
+        const vcs = yield* init()
+        const info = yield* vcs.repositoryInfo()
+
+        expect(info.isGit).toBe(true)
+        expect(info.branch).toBeDefined()
+        expect(info.defaultBranch).toBeDefined()
+        expect(info.status.length).toBe(1)
+        expect(info.status[0].file).toBe("new.txt")
+        expect(info.lastCommit).toBeDefined()
+        expect(info.lastCommit!.subject).toBe("initial commit")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "repositoryInfo() returns isGit=false for non-git directories",
+    () =>
+      Effect.gen(function* () {
+        const vcs = yield* init()
+        const info = yield* vcs.repositoryInfo()
+
+        expect(info.isGit).toBe(false)
+        expect(info.branch).toBeUndefined()
+        expect(info.status).toEqual([])
+      }),
+  )
+})

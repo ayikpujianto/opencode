@@ -8278,6 +8278,205 @@ export type VcsApplyResponses = {
 
 export type VcsApplyResponse = VcsApplyResponses[keyof VcsApplyResponses]
 
+export type VcsStageData = {
+  body: {
+    files: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/stage"
+}
+
+export type VcsStageErrors = {
+  /**
+   * VcsCommitError | InvalidRequestError
+   */
+  400: VcsCommitError | InvalidRequestError
+}
+
+export type VcsStageError = VcsStageErrors[keyof VcsStageErrors]
+
+export type VcsStageResponses = {
+  /**
+   * Files staged
+   */
+  200: void
+}
+
+export type VcsStageResponse = VcsStageResponses[keyof VcsStageResponses]
+
+export type VcsUnstageData = {
+  body: {
+    files: Array<string>
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/unstage"
+}
+
+export type VcsUnstageErrors = {
+  /**
+   * VcsCommitError | InvalidRequestError
+   */
+  400: VcsCommitError | InvalidRequestError
+}
+
+export type VcsUnstageError = VcsUnstageErrors[keyof VcsUnstageErrors]
+
+export type VcsUnstageResponses = {
+  /**
+   * Files unstaged
+   */
+  200: void
+}
+
+export type VcsUnstageResponse = VcsUnstageResponses[keyof VcsUnstageResponses]
+
+export type VcsCommitData = {
+  body: {
+    message: string
+  }
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/commit"
+}
+
+export type VcsCommitErrors = {
+  /**
+   * VcsCommitError | InvalidRequestError
+   */
+  400: VcsCommitError2 | InvalidRequestError
+}
+
+export type VcsCommitError = VcsCommitErrors[keyof VcsCommitErrors]
+
+export type VcsCommitResponses = {
+  /**
+   * Commit created
+   */
+  200: {
+    hash: string
+  }
+}
+
+export type VcsCommitResponse = VcsCommitResponses[keyof VcsCommitResponses]
+
+export type VcsPushData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/push"
+}
+
+export type VcsPushErrors = {
+  /**
+   * VcsCommitError | InvalidRequestError
+   */
+  400: VcsCommitError | InvalidRequestError
+}
+
+export type VcsPushError = VcsPushErrors[keyof VcsPushErrors]
+
+export type VcsPushResponses = {
+  /**
+   * Push completed
+   */
+  200: {
+    success: boolean
+    message?: string
+  }
+}
+
+export type VcsPushResponse = VcsPushResponses[keyof VcsPushResponses]
+
+export type VcsLogData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/log"
+}
+
+export type VcsLogErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type VcsLogError = VcsLogErrors[keyof VcsLogErrors]
+
+export type VcsLogResponses = {
+  /**
+   * Recent commits
+   */
+  200: Array<VcsCommitInfo>
+}
+
+export type VcsLogResponse = VcsLogResponses[keyof VcsLogResponses]
+
+export type VcsRepositoryData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/vcs/repository"
+}
+
+export type VcsRepositoryErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type VcsRepositoryError = VcsRepositoryErrors[keyof VcsRepositoryErrors]
+
+export type VcsRepositoryResponses = {
+  /**
+   * Repository info
+   */
+  200: {
+    branch?: string
+    defaultBranch?: string
+    status: Array<VcsFileStatus>
+    lastCommit?: VcsCommitInfo
+    isGit: boolean
+  }
+}
+
+export type VcsRepositoryResponse = VcsRepositoryResponses[keyof VcsRepositoryResponses]
+
+export type VcsCommitInfo = {
+  hash: string
+  subject: string
+  date: string
+}
+
+export type VcsCommitError2 = {
+  name: "VcsCommitError"
+  data: {
+    message: string
+    reason: "non-git" | "empty-message" | "nothing-to-commit" | "push-failed"
+  }
+}
+
 export type CommandListData = {
   body?: never
   path?: never

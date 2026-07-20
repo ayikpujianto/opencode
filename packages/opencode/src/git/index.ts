@@ -52,6 +52,12 @@ export type Patch = {
   readonly truncated: boolean
 }
 
+export type CommitInfo = {
+  readonly hash: string
+  readonly subject: string
+  readonly date: string
+}
+
 export interface PatchOptions {
   readonly context?: number
   readonly maxOutputBytes?: number
@@ -88,6 +94,11 @@ export interface Interface {
   readonly patchUntracked: (cwd: string, file: string, options?: PatchOptions) => Effect.Effect<Patch>
   readonly statUntracked: (cwd: string, file: string) => Effect.Effect<Stat | undefined>
   readonly applyPatch: (cwd: string, patch: string) => Effect.Effect<Result>
+  readonly stage: (cwd: string, files: string[]) => Effect.Effect<Result>
+  readonly unstage: (cwd: string, files: string[]) => Effect.Effect<Result>
+  readonly commit: (cwd: string, message: string) => Effect.Effect<Result>
+  readonly push: (cwd: string) => Effect.Effect<Result>
+  readonly log: (cwd: string, count?: number) => Effect.Effect<CommitInfo[]>
 }
 
 const kind = (code: string): Kind => {
@@ -323,6 +334,40 @@ const layer = Layer.effect(
       return yield* run(["apply", "-"], { cwd, stdin: stdin(patch) })
     })
 
+    const stage = Effect.fn("Git.stage")(function* (cwd: string, files: string[]) {
+      if (files.length === 0) return yield* run(["status", "--porcelain"], { cwd })
+      return yield* run(["add", "--", ...files], { cwd })
+    })
+
+    const unstage = Effect.fn("Git.unstage")(function* (cwd: string, files: string[]) {
+      if (files.length === 0) return yield* run(["reset", "HEAD", "--", "."], { cwd })
+      return yield* run(["reset", "HEAD", "--", ...files], { cwd })
+    })
+
+    const commit = Effect.fn("Git.commit")(function* (cwd: string, message: string) {
+      return yield* run(["commit", "-m", message], { cwd })
+    })
+
+    const push = Effect.fn("Git.push")(function* (cwd: string) {
+      return yield* run(["push"], { cwd })
+    })
+
+    const log = Effect.fn("Git.log")(function* (cwd: string, count = 10) {
+      const result = yield* run(
+        ["log", `--max-count=${count}`, "--format=%H\t%s\t%ai"],
+        { cwd },
+      )
+      if (result.exitCode !== 0) return []
+      return result
+        .text()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [hash, subject, date] = line.split("\t")
+          return { hash: hash ?? "", subject: subject ?? "", date: date ?? "" } satisfies CommitInfo
+        })
+    })
+
     return Service.of({
       run,
       branch,
@@ -339,6 +384,11 @@ const layer = Layer.effect(
       patchUntracked,
       statUntracked,
       applyPatch,
+      stage,
+      unstage,
+      commit,
+      push,
+      log,
     })
   }),
 )

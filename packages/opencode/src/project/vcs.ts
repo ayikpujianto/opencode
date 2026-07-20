@@ -278,6 +278,44 @@ export class PatchApplyError extends Schema.TaggedErrorClass<PatchApplyError>()(
   reason: Schema.Literals(["non-git", "not-clean"]),
 }) {}
 
+export const CommitInfo = Schema.Struct({
+  hash: Schema.String,
+  subject: Schema.String,
+  date: Schema.String,
+}).annotate({ identifier: "VcsCommitInfo" })
+export type CommitInfo = Schema.Schema.Type<typeof CommitInfo>
+
+export const StageInput = Schema.Struct({
+  files: Schema.Array(Schema.String),
+})
+export type StageInput = Schema.Schema.Type<typeof StageInput>
+
+export const UnstageInput = Schema.Struct({
+  files: Schema.Array(Schema.String),
+})
+export type UnstageInput = Schema.Schema.Type<typeof UnstageInput>
+
+export const CommitInput = Schema.Struct({
+  message: Schema.String.check(Schema.isMaxLength(1000)),
+})
+export type CommitInput = Schema.Schema.Type<typeof CommitInput>
+
+export const CommitResult = Schema.Struct({
+  hash: Schema.String,
+})
+export type CommitResult = Schema.Schema.Type<typeof CommitResult>
+
+export const PushResult = Schema.Struct({
+  success: Schema.Boolean,
+  message: Schema.optional(Schema.String),
+})
+export type PushResult = Schema.Schema.Type<typeof PushResult>
+
+export class VcsCommitError extends Schema.TaggedErrorClass<VcsCommitError>()("VcsCommitError", {
+  message: Schema.String,
+  reason: Schema.Literals(["non-git", "empty-message", "nothing-to-commit", "push-failed"]),
+}) {}
+
 export interface Interface {
   readonly init: () => Effect.Effect<void>
   readonly branch: () => Effect.Effect<string | undefined>
@@ -286,6 +324,18 @@ export interface Interface {
   readonly diff: (mode: Mode, options?: DiffOptions) => Effect.Effect<FileDiff[]>
   readonly diffRaw: () => Effect.Effect<string>
   readonly apply: (input: ApplyInput) => Effect.Effect<ApplyResult, PatchApplyError>
+  readonly stage: (input: StageInput) => Effect.Effect<void, VcsCommitError>
+  readonly unstage: (input: UnstageInput) => Effect.Effect<void, VcsCommitError>
+  readonly commit: (input: CommitInput) => Effect.Effect<CommitResult, VcsCommitError>
+  readonly push: () => Effect.Effect<PushResult, VcsCommitError>
+  readonly log: (count?: number) => Effect.Effect<CommitInfo[]>
+  readonly repositoryInfo: () => Effect.Effect<{
+    branch: string | undefined
+    defaultBranch: string | undefined
+    status: FileStatus[]
+    lastCommit: CommitInfo | undefined
+    isGit: boolean
+  }>
 }
 
 interface State {
@@ -413,6 +463,114 @@ const layer: Layer.Layer<Service, never, Git.Service | EventV2Bridge.Service> = 
           })
         }
         return { applied: true }
+      }),
+      stage: Effect.fn("Vcs.stage")(function* (input: StageInput) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new VcsCommitError({
+            message: "Cannot stage files: project is not git-based",
+            reason: "non-git",
+          })
+        }
+        const result = yield* git.stage(ctx.directory, input.files)
+        if (result.exitCode !== 0) {
+          return yield* new VcsCommitError({
+            message: `Stage failed: ${result.stderr.toString("utf8").trim() || "unknown error"}`,
+            reason: "nothing-to-commit",
+          })
+        }
+      }),
+      unstage: Effect.fn("Vcs.unstage")(function* (input: UnstageInput) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new VcsCommitError({
+            message: "Cannot unstage files: project is not git-based",
+            reason: "non-git",
+          })
+        }
+        const result = yield* git.unstage(ctx.directory, input.files)
+        if (result.exitCode !== 0) {
+          return yield* new VcsCommitError({
+            message: `Unstage failed: ${result.stderr.toString("utf8").trim() || "unknown error"}`,
+            reason: "nothing-to-commit",
+          })
+        }
+      }),
+      commit: Effect.fn("Vcs.commit")(function* (input: CommitInput) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new VcsCommitError({
+            message: "Cannot commit: project is not git-based",
+            reason: "non-git",
+          })
+        }
+        if (!input.message.trim()) {
+          return yield* new VcsCommitError({
+            message: "Commit message cannot be empty",
+            reason: "empty-message",
+          })
+        }
+        const result = yield* git.commit(ctx.directory, input.message)
+        if (result.exitCode !== 0) {
+          const stderr = result.stderr.toString("utf8").trim()
+          if (stderr.includes("nothing to commit")) {
+            return yield* new VcsCommitError({
+              message: "Nothing to commit",
+              reason: "nothing-to-commit",
+            })
+          }
+          return yield* new VcsCommitError({
+            message: `Commit failed: ${stderr || "unknown error"}`,
+            reason: "nothing-to-commit",
+          })
+        }
+        const logResult = yield* git.log(ctx.directory, 1)
+        const hash = logResult[0]?.hash ?? ""
+        return { hash }
+      }),
+      push: Effect.fn("Vcs.push")(function* () {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return yield* new VcsCommitError({
+            message: "Cannot push: project is not git-based",
+            reason: "non-git",
+          })
+        }
+        const result = yield* git.push(ctx.directory)
+        if (result.exitCode !== 0) {
+          return yield* new VcsCommitError({
+            message: `Push failed: ${result.stderr.toString("utf8").trim() || "unknown error"}`,
+            reason: "push-failed",
+          })
+        }
+        return { success: true }
+      }),
+      log: Effect.fn("Vcs.log")(function* (count?: number) {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") return []
+        return yield* git.log(ctx.directory, count)
+      }),
+      repositoryInfo: Effect.fn("Vcs.repositoryInfo")(function* () {
+        const ctx = yield* InstanceState.context
+        if (ctx.project.vcs !== "git") {
+          return { branch: undefined, defaultBranch: undefined, status: [], lastCommit: undefined, isGit: false }
+        }
+        const [branch, defaultBranch, statusList, logResult] = yield* Effect.all(
+          [git.branch(ctx.directory), git.defaultBranch(ctx.directory), git.status(ctx.directory), git.log(ctx.directory, 1)],
+          { concurrency: 4 },
+        )
+        return {
+          branch: branch ?? undefined,
+          defaultBranch: defaultBranch?.name,
+          status: statusList.map((item) => ({
+            file: item.file,
+            additions: 0,
+            deletions: 0,
+            status: item.status,
+          })),
+          lastCommit: logResult[0],
+          isGit: true,
+        }
       }),
     })
   }),
