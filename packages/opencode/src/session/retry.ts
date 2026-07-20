@@ -25,8 +25,9 @@ export type Retryable = {
 
 export const RETRY_INITIAL_DELAY = 2000
 export const RETRY_BACKOFF_FACTOR = 2
+export const RETRY_MAX_ATTEMPTS = 2
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
-export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
+export const RETRY_MAX_DELAY = 30_000 // never leave a web session waiting for hours
 
 function cap(ms: number) {
   return Math.min(ms, RETRY_MAX_DELAY)
@@ -65,7 +66,44 @@ export function delay(attempt: number, error?: SessionV1.APIError) {
   return cap(Math.min(RETRY_INITIAL_DELAY * Math.pow(RETRY_BACKOFF_FACTOR, attempt - 1), RETRY_MAX_DELAY_NO_HEADERS))
 }
 
+const FATAL_PROVIDER_PATTERNS = [
+  "billing verification failed",
+  "check your payment method",
+  "payment method",
+  "insufficient_quota",
+  "insufficient quota",
+  "insufficient balance",
+  "invalid_api_key",
+  "invalid api key",
+  "api key is invalid",
+  "authentication failed",
+  "unauthorized",
+  "subscription quota exceeded",
+  "free usage exceeded",
+  "free quota exhausted",
+  "freeusagelimiterror",
+  "gousagelimiterror",
+] as const
+
+function fatalProviderFailure(value: unknown) {
+  if (typeof value !== "string") return false
+  const lower = value.toLowerCase()
+  return FATAL_PROVIDER_PATTERNS.some((pattern) => lower.includes(pattern))
+}
+
 export function retryable(error: Err, provider: string) {
+  // context overflow and permanent account/credential failures must fail fast.
+  if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
+  if (SessionV1.APIError.isInstance(error)) {
+    const responseBody = error.data.responseBody ?? ""
+    const hasOpenCodeUsageAction =
+      responseBody.includes("FreeUsageLimitError") || responseBody.includes("GoUsageLimitError")
+    const fatalText = `${error.data.message ?? ""}\n${responseBody}`
+    if (!hasOpenCodeUsageAction && fatalProviderFailure(fatalText)) return undefined
+  } else if (isRecord(error.data) && fatalProviderFailure(error.data.message)) {
+    return undefined
+  }
+
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
   if (SessionV1.APIError.isInstance(error)) {
@@ -183,6 +221,7 @@ export function policy(opts: {
       const error = opts.parse(meta.input)
       const retry = retryable(error, opts.provider)
       if (!retry) return Cause.done(meta.attempt)
+      if (meta.attempt > RETRY_MAX_ATTEMPTS) return Cause.done(meta.attempt)
       return Effect.gen(function* () {
         const wait = delay(meta.attempt, SessionV1.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis

@@ -2242,6 +2242,140 @@ it.instance("records aborted errors when prompt is cancelled mid-stream", () =>
   }),
 )
 
+// Continue-after-provider-failure regression
+
+it.instance("prompt cancels previous stuck runner before starting new generation", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({ title: "Continue after failure" })
+
+    yield* llm.hang
+
+    const first = yield* prompt
+      .prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "first" }],
+      })
+      .pipe(Effect.forkChild)
+
+    yield* llm.wait(1)
+    yield* waitForBusy(session.id)
+
+    yield* llm.hang
+
+    const second = yield* prompt
+      .prompt({
+        sessionID: session.id,
+        agent: "build",
+        model: { providerID: ref.providerID, modelID: ref.modelID },
+        parts: [{ type: "text", text: "second" }],
+      })
+      .pipe(Effect.forkChild)
+
+    const firstExit = yield* Fiber.await(first)
+    expect(Exit.isSuccess(firstExit)).toBe(true)
+    if (Exit.isSuccess(firstExit)) {
+      expect(firstExit.value.info.role).toBe("assistant")
+    }
+
+    yield* llm.wait(2)
+    yield* waitForBusy(session.id)
+    yield* prompt.cancel(session.id)
+
+    const secondExit = yield* Fiber.await(second)
+    expect(Exit.isSuccess(secondExit)).toBe(true)
+    if (Exit.isSuccess(secondExit)) {
+      expect(secondExit.value.info.role).toBe("assistant")
+    }
+
+    const msgs = yield* sessions.messages({ sessionID: session.id })
+    const assistants = msgs.filter((m) => m.info.role === "assistant")
+    expect(assistants.length).toBeGreaterThanOrEqual(2)
+  }),
+)
+
+it.instance("prompt with noReply:true does not cancel running generation", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({ title: "noReply test" })
+
+    yield* llm.hang
+
+    const fib = yield* prompt
+      .prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "hello" }],
+      })
+      .pipe(Effect.forkChild)
+
+    yield* llm.wait(1)
+    yield* waitForBusy(session.id)
+
+    const admission = yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "admitted only" }],
+    })
+
+    expect(admission.info.role).toBe("user")
+
+    const statusSvc = yield* SessionStatus.Service
+    const st = yield* statusSvc.get(session.id)
+    expect(st.type).toBe("busy")
+
+    yield* prompt.cancel(session.id)
+
+    const exit = yield* Fiber.await(fib)
+    expect(Exit.isSuccess(exit)).toBe(true)
+  }),
+)
+
+it.instance("prompt restarts after cancel with new model and generates", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const session = yield* sessions.create({ title: "Restart after cancel" })
+
+    yield* llm.hang
+
+    const first = yield* prompt
+      .prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "first" }],
+      })
+      .pipe(Effect.forkChild)
+
+    yield* llm.wait(1)
+    yield* waitForBusy(session.id)
+    yield* prompt.cancel(session.id)
+    const firstExit = yield* Fiber.await(first)
+    expect(Exit.isSuccess(firstExit)).toBe(true)
+
+    yield* llm.text("packages/opencode/src/session/processor.ts")
+
+    const second = yield* prompt.prompt({
+      sessionID: session.id,
+      agent: "build",
+      model: { providerID: ref.providerID, modelID: ref.modelID },
+      parts: [{ type: "text", text: "second" }],
+    })
+
+    expect(second.info.role).toBe("assistant")
+    expect(second.parts.some((p) => p.type === "text" && p.text.includes("processor.ts"))).toBe(true)
+
+    expect(yield* llm.calls).toBe(2)
+  }),
+)
+
 // Agent variant
 
 noLLMServer.instance(

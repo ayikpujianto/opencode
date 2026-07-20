@@ -1069,23 +1069,6 @@ const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
-      // Fix Continue after provider failure: if previous attempt is stuck in provider retry
-      // (rate limit / backoff timer), cancel the obsolete timer and clear retry state so a
-      // fresh generation with a potentially different model can start immediately.
-      // Without this, Runner.ensureRunning would join the sleeping retry fiber and the new
-      // prompt would never create a provider request.
-      const currentStatus = yield* status
-        .get(input.sessionID)
-        .pipe(Effect.catchAll(() => Effect.succeed({ type: "idle" as const })))
-      if (currentStatus.type === "retry") {
-        yield* Effect.logInfo("prompt cancelling obsolete retry", {
-          "session.id": input.sessionID,
-          attempt: currentStatus.attempt,
-        })
-        yield* state.cancel(input.sessionID).pipe(Effect.ignore)
-        yield* status.set(input.sessionID, { type: "idle" }).pipe(Effect.ignore)
-      }
-
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
@@ -1101,6 +1084,7 @@ const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
+      yield* state.cancel(input.sessionID)
       return yield* loop({ sessionID: input.sessionID })
     })
 

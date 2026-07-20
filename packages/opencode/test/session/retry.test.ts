@@ -73,12 +73,12 @@ describe("session.retry.delay", () => {
     expect(SessionRetry.delay(1, error)).toBe(2000)
   })
 
-  test("uses retry-after values even when exceeding 10 minutes with headers", () => {
+  test("caps retry-after values to 30 seconds for interactive web sessions", () => {
     const error = apiError({ "retry-after": "50" })
-    expect(SessionRetry.delay(1, error)).toBe(50000)
+    expect(SessionRetry.delay(1, error)).toBe(SessionRetry.RETRY_MAX_DELAY)
 
     const longError = apiError({ "retry-after-ms": "700000" })
-    expect(SessionRetry.delay(1, longError)).toBe(700000)
+    expect(SessionRetry.delay(1, longError)).toBe(SessionRetry.RETRY_MAX_DELAY)
   })
 
   test("caps oversized header delays to the runtime timer limit", () => {
@@ -118,6 +118,29 @@ describe("session.retry.delay", () => {
 })
 
 describe("session.retry.retryable", () => {
+  test.each([
+    "Billing verification failed. Please check your payment method.",
+    "insufficient_quota",
+    "Invalid API key",
+    "Authentication failed",
+    "Unauthorized",
+    "Subscription quota exceeded. You can continue using free models.",
+    "Free usage exceeded, subscribe to Go",
+  ])("does not retry permanent provider failure: %s", (message) => {
+    expect(SessionRetry.retryable(wrap(message), retryProvider)).toBeUndefined()
+  })
+
+  test("does not retry permanent API billing failures even when SDK marks them retryable", () => {
+    const error = Schema.decodeUnknownSync(SessionV1.APIError.Schema)(
+      new SessionV1.APIError({
+        message: "Billing verification failed. Please check your payment method.",
+        isRetryable: true,
+        responseBody: JSON.stringify({ error: { code: "insufficient_quota" } }),
+      }).toObject(),
+    )
+    expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
+  })
+
   test("maps too_many_requests json messages", () => {
     const error = wrap(JSON.stringify({ type: "error", error: { type: "too_many_requests" } }))
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Too Many Requests" })
