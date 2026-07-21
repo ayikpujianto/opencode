@@ -62,7 +62,7 @@ export function WorkspacePage() {
   })
 
   return (
-    <div class="flex h-full w-full flex-col overflow-hidden">
+    <div class="flex h-full min-h-0 w-full min-w-0 max-w-none flex-1 self-stretch flex-col overflow-hidden">
       <Show when={!loading()} fallback={<WorkspaceLoadingSkeleton />}>
         <Show when={repositoryInfo()?.isGit} fallback={<NotAGitRepository />}>
           <div class="flex flex-1 flex-col overflow-hidden">
@@ -75,9 +75,9 @@ export function WorkspacePage() {
               refreshing={refreshing()}
             />
 
-            <div class="flex min-w-0 flex-1 overflow-hidden">
+            <div class="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-2">
               {/* Changed Files Panel */}
-              <div class="flex w-1/2 flex-col border-r border-zinc-800">
+              <div class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-zinc-800">
                 <WorkspaceChangedFiles
                   files={repositoryInfo()?.status ?? []}
                   onRefresh={refresh}
@@ -87,7 +87,7 @@ export function WorkspacePage() {
               </div>
 
               {/* Right Column: Task Activity + Source Control */}
-              <div class="flex w-1/2 flex-col overflow-hidden">
+              <div class="flex min-h-0 min-w-0 flex-col overflow-hidden">
                 <WorkspaceTaskActivity directory={directory() ?? ""} client={sdk().client} />
 
                 <WorkspaceSourceControl

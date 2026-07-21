@@ -64,6 +64,18 @@ const NewSession = lazy(() => import("@/pages/new-session"))
 const WorkspacePage = lazy(() => import("@/pages/workspace/workspace").then((m) => ({ default: m.WorkspacePage })))
 const PatchReviewPage = lazy(() => import("@/pages/workspace/review/patch-review").then((m) => ({ default: m.PatchReviewPage })))
 
+function WorkspaceRoute() {
+  return (
+    <SelectedServerProviders>
+      <DirectoryLayout>
+        <div class="fixed inset-0 z-50 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background-base">
+          <WorkspacePage />
+        </div>
+      </DirectoryLayout>
+    </SelectedServerProviders>
+  )
+}
+
 const SessionRoute = () => {
   const settings = useSettings()
   const params = useParams()
@@ -604,10 +616,10 @@ function Routes(props: { serverScoped?: JSX.Element }) {
         <Route path="/:dir" component={DirectoryLayout}>
           <Route path="/" component={() => <Navigate href="session" />} />
           <Route path="/session/:id?" component={SessionRoute} />
-          <Route path="/workspace" component={WorkspacePage} />
           <Route path="/review" component={PatchReviewPage} />
         </Route>
       </Route>
+      <Route path="/:dir/workspace" component={WorkspaceRoute} />
       <Show when={settings.general.newLayoutDesigns()}>
         <Route path="/" component={NewHome} />
         <Route path="/:dir/session/:id" component={NewLayoutLegacySessionRedirect} />
