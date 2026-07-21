@@ -1030,6 +1030,7 @@ function HomeProjectRow(props: {
   clearNotifications: (server: ServerConnection.Any, project: LocalProject) => void
   language: ReturnType<typeof useLanguage>
 }) {
+  const navigate = useNavigate()
   const global = useGlobal()
   const platform = usePlatform()
   const serverUnreachable = () => global.servers.health[ServerConnection.key(props.server)]?.healthy === false
@@ -1086,6 +1087,9 @@ function HomeProjectRow(props: {
             <MenuV2.Content>
               <MenuV2.Item onSelect={() => props.openNewSession(props.server, props.project.worktree)}>
                 {props.language.t("command.session.new")}
+              </MenuV2.Item>
+              <MenuV2.Item onSelect={() => navigate(`/${base64Encode(props.project.worktree)}/workspace`)}>
+                Workspace
               </MenuV2.Item>
               <MenuV2.Item onSelect={() => props.editProject(props.server, props.project)}>
                 {props.language.t("dialog.project.edit.title")}

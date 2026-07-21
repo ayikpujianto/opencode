@@ -1,4 +1,5 @@
 import { Show } from "solid-js"
+import { useNavigate } from "@solidjs/router"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
@@ -13,12 +14,21 @@ interface WorkspaceHeaderProps {
 }
 
 export function WorkspaceHeader(props: WorkspaceHeaderProps) {
+  const navigate = useNavigate()
   const isDirty = () => props.statusCount > 0
   const isOnDefaultBranch = () => props.branch === props.defaultBranch
 
   return (
     <div class="flex items-center justify-between border-b border-zinc-800 bg-zinc-900/50 px-4 py-3">
       <div class="flex items-center gap-3">
+        <Tooltip value="Back to project">
+          <IconButton
+            icon={<Icon name="arrow-left" class="h-4 w-4" />}
+            onClick={() => navigate("/")}
+            variant="ghost"
+            size="small"
+          />
+        </Tooltip>
         {/* Branch info */}
         <div class="flex items-center gap-2">
           <Icon name="branch" class="h-4 w-4 text-zinc-400" />
