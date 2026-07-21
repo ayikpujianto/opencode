@@ -62,7 +62,7 @@ export function WorkspacePage() {
   })
 
   return (
-    <div class="flex h-full flex-col overflow-hidden">
+    <div class="flex h-full w-full flex-col overflow-hidden">
       <Show when={!loading()} fallback={<WorkspaceLoadingSkeleton />}>
         <Show when={repositoryInfo()?.isGit} fallback={<NotAGitRepository />}>
           <div class="flex flex-1 flex-col overflow-hidden">
@@ -75,7 +75,7 @@ export function WorkspacePage() {
               refreshing={refreshing()}
             />
 
-            <div class="flex flex-1 overflow-hidden">
+            <div class="flex min-w-0 flex-1 overflow-hidden">
               {/* Changed Files Panel */}
               <div class="flex w-1/2 flex-col border-r border-zinc-800">
                 <WorkspaceChangedFiles
